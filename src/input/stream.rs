@@ -1,15 +1,11 @@
 use crate::errors::{FormatError, SourceError};
 use crate::input::{Formatter, SortOrder, Source};
-use async_std::fs;
-use async_std::fs::ReadDir;
-use async_std::prelude::*;
-use async_std::stream::Stream;
+use std::fs;
+use std::fs::ReadDir;
 use regex::Regex;
 use std::error::Error;
 use std::iter::IntoIterator;
 use std::path::Path;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 use std::vec::IntoIter;
 
 pub enum InputStream {
@@ -18,7 +14,7 @@ pub enum InputStream {
 }
 
 impl InputStream {
-    pub async fn try_from(
+    pub fn try_from(
         source: Source,
         formatter: Option<Formatter>,
         preserve_extension: bool,
@@ -29,12 +25,12 @@ impl InputStream {
 
         let formatter = formatter.ok_or(FormatError::EmptyFormatter)?;
 
-        let mut entries = fs::read_dir(".").await?;
+        let mut entries = fs::read_dir(".")?;
 
         if let Source::Sort(order) = source {
             let mut map = Vec::new();
             let mut inputs = Vec::new();
-            while let Some(entry) = entries.next().await {
+            while let Some(entry) = entries.next() {
                 if let Ok(entry) = entry {
                     inputs.push(entry.file_name().to_string_lossy().to_string());
                 }
@@ -73,35 +69,35 @@ impl InputStream {
     }
 }
 
-impl Stream for InputStream {
+impl Iterator for InputStream {
     type Item = (String, String);
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.as_mut().get_mut() {
-            Self::VectorStream(ref mut iter) => Poll::Ready(iter.next()),
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::VectorStream(ref mut iter) => return iter.next(),
             Self::DirectoryStream(ref formatter, ref re, preserve_extension, iter) => {
-                match Pin::new(iter).poll_next(cx) {
-                    Poll::Ready(Some(Ok(entry))) => {
-                        let input = entry.file_name().to_string_lossy().to_string();
-                        if let Some(cap) = re.captures(input.as_str()) {
-                            let vars: Vec<&str> = cap
-                                .iter()
-                                .map(|c| c.map(|c| c.as_str()).unwrap_or_default())
-                                .collect();
-                            let mut output = formatter.format(vars.as_slice());
-                            if *preserve_extension {
-                                if let Some(extension) = Path::new(input.as_str()).extension() {
-                                    output.push('.');
-                                    output.push_str(extension.to_str().unwrap_or_default());
+                loop {
+                    match iter.next() {
+                        Some(Ok(entry)) => {
+                            let input = entry.file_name().to_string_lossy().to_string();
+                            if let Some(cap) = re.captures(input.as_str()) {
+                                let vars: Vec<&str> = cap
+                                    .iter()
+                                    .map(|c| c.map(|c| c.as_str()).unwrap_or_default())
+                                    .collect();
+                                let mut output = formatter.format(vars.as_slice());
+                                if *preserve_extension {
+                                    if let Some(extension) = Path::new(input.as_str()).extension() {
+                                        output.push('.');
+                                        output.push_str(extension.to_str().unwrap_or_default());
+                                    }
                                 }
+                                return Some((input, output));
                             }
-                            return Poll::Ready(Some((input, output)));
                         }
-                        self.poll_next(cx)
+                        Some(Err(_)) => { continue; }
+                        None => { return None; }
                     }
-                    Poll::Ready(Some(Err(_))) => self.poll_next(cx),
-                    Poll::Ready(None) => Poll::Ready(None),
-                    Poll::Pending => Poll::Pending,
                 }
             }
         }

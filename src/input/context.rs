@@ -8,7 +8,7 @@ pub struct Context {
 }
 
 impl Context {
-    pub async fn new(
+    pub fn new(
         source: Source,
         formatter: Option<Formatter>,
         preserve_extension: bool,
@@ -20,7 +20,7 @@ impl Context {
         }
     }
 
-    pub async fn into_iter(self) -> Result<InputStream, Box<dyn Error>> {
-        InputStream::try_from(self.source, self.formatter, self.preserve_extension).await
+    pub fn into_iter(self) -> Result<InputStream, Box<dyn Error>> {
+        InputStream::try_from(self.source, self.formatter, self.preserve_extension)
     }
 }
